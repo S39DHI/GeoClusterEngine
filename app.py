@@ -7,7 +7,9 @@ This dashboard provides an interactive interface for:
 - Configuring analysis parameters
 - Viewing POI maps and clusters
 - Exploring heatmaps and recommendations
-- Downloading analysis results
+- What-if scenario modeling
+- PDF report generation
+- Multi-city comparison
 """
 
 import os
@@ -17,12 +19,15 @@ import numpy as np
 import folium
 from streamlit_folium import st_folium, folium_static
 import time
+import json
+from datetime import datetime
 
 from modules.fetch_data import DataFetcher
 from modules.clean_data import DataCleaner
 from modules.clustering import GeoClusterer
 from modules.visualize import MapVisualizer
 from modules.scoring import LocationScorer
+from modules.report_generator import ReportGenerator
 
 
 os.makedirs('data', exist_ok=True)
@@ -59,10 +64,17 @@ st.markdown("""
         text-align: center;
     }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 2rem;
+        gap: 1.5rem;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 1rem 2rem;
+        padding: 0.8rem 1.5rem;
+    }
+    .scenario-card {
+        background-color: #e8f4f8;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 0.5rem;
+        border-left: 4px solid #1f77b4;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -84,22 +96,22 @@ def initialize_session_state():
         st.session_state.center = None
     if 'cluster_stats' not in st.session_state:
         st.session_state.cluster_stats = None
+    if 'saved_scenarios' not in st.session_state:
+        st.session_state.saved_scenarios = []
+    if 'multi_city_results' not in st.session_state:
+        st.session_state.multi_city_results = {}
+    if 'current_city' not in st.session_state:
+        st.session_state.current_city = None
+    if 'current_business' not in st.session_state:
+        st.session_state.current_business = None
+    if 'current_weights' not in st.session_state:
+        st.session_state.current_weights = None
 
 
 def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
                           weights: dict, progress_bar) -> dict:
     """
     Run the complete analysis pipeline with progress updates.
-    
-    Args:
-        city: City name
-        business_type: Business type to analyze
-        radius_km: Search radius in km
-        weights: Scoring weights dictionary
-        progress_bar: Streamlit progress bar object
-        
-    Returns:
-        Dictionary with analysis results
     """
     results = {}
     
@@ -112,6 +124,10 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
         return None
     
     results['center'] = center
+    results['city'] = city
+    results['business_type'] = business_type
+    results['radius_km'] = radius_km
+    results['weights'] = weights.copy()
     st.session_state.center = center
     
     progress_bar.progress(20, "Fetching POI data from OpenStreetMap...")
@@ -225,6 +241,58 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     return results
 
 
+def run_quick_rescore(weights: dict) -> pd.DataFrame:
+    """
+    Re-score existing data with new weights without refetching.
+    """
+    if st.session_state.cleaned_pois is None or st.session_state.center is None:
+        return None
+    
+    cleaned_pois = st.session_state.cleaned_pois
+    center = st.session_state.center
+    results = st.session_state.results
+    
+    scorer = LocationScorer(weights)
+    
+    business_type = results.get('business_type', 'cafe')
+    radius_km = results.get('radius_km', 5.0)
+    
+    fetcher = DataFetcher("", radius_km)
+    supporting_categories = fetcher.get_supporting_pois(business_type)
+    
+    candidates = scorer.generate_candidate_locations(
+        center[0], center[1],
+        radius_km=radius_km,
+        grid_size=15
+    )
+    
+    scores = scorer.score_locations(
+        candidates,
+        cleaned_pois,
+        business_type,
+        supporting_categories
+    )
+    
+    return scorer.get_top_locations(10)
+
+
+def save_scenario(name: str, weights: dict, top_locations: pd.DataFrame):
+    """Save current scenario for comparison."""
+    scenario = {
+        'name': name,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'weights': weights.copy(),
+        'top_score': float(top_locations['final_score'].max()) if len(top_locations) > 0 else 0,
+        'top_location': {
+            'lat': float(top_locations.iloc[0]['latitude']) if len(top_locations) > 0 else 0,
+            'lon': float(top_locations.iloc[0]['longitude']) if len(top_locations) > 0 else 0,
+            'score': float(top_locations.iloc[0]['final_score']) if len(top_locations) > 0 else 0
+        },
+        'top_5_scores': top_locations.head(5)['final_score'].tolist() if len(top_locations) > 0 else []
+    }
+    st.session_state.saved_scenarios.append(scenario)
+
+
 def display_metrics(results: dict):
     """Display key metrics in a row of cards."""
     col1, col2, col3, col4 = st.columns(4)
@@ -272,24 +340,14 @@ def render_map_from_file(filepath: str, height: int = 500):
         st.warning(f"Map file not found: {filepath}")
 
 
-def create_live_map(map_type: str, center: tuple, cleaned_pois, 
-                    clustered_pois, top_locations, cluster_stats,
-                    business_type: str) -> folium.Map:
-    """Create a live Folium map based on type."""
-    viz = MapVisualizer(center[0], center[1], zoom_start=13)
-    
-    if map_type == "All POIs":
-        return viz.create_all_pois_map(cleaned_pois)
-    elif map_type == "Clusters":
-        return viz.create_cluster_map(clustered_pois, cluster_stats)
-    elif map_type == "Density Heatmap":
-        return viz.create_heatmap(cleaned_pois)
-    elif map_type == "Competition":
-        return viz.create_competition_heatmap(cleaned_pois, business_type)
-    elif map_type == "Recommendations":
-        return viz.create_recommendations_map(cleaned_pois, top_locations, business_type)
-    else:
-        return viz.create_base_map()
+def generate_pdf_report(city: str, business_type: str, radius_km: float,
+                        results: dict, weights: dict, top_locations: pd.DataFrame) -> str:
+    """Generate PDF report and return the file path."""
+    report_gen = ReportGenerator('data/analysis_report.pdf')
+    return report_gen.generate_report(
+        city, business_type, radius_km,
+        results, weights, top_locations
+    )
 
 
 def main():
@@ -346,15 +404,27 @@ def main():
             'infrastructure': w_infrastructure / total
         }
         
+        st.session_state.current_weights = weights
+        
         st.divider()
         
         run_analysis = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
         
         if st.session_state.analysis_complete:
             st.success("Analysis Complete!")
+            
+            if st.button("🔄 Re-score with New Weights", use_container_width=True):
+                with st.spinner("Re-scoring..."):
+                    new_top = run_quick_rescore(weights)
+                    if new_top is not None:
+                        st.session_state.top_locations = new_top
+                        st.session_state.results['top_locations'] = new_top
+                        st.rerun()
     
     if run_analysis:
         st.session_state.analysis_complete = False
+        st.session_state.current_city = city
+        st.session_state.current_business = business_type
         
         with st.spinner("Running analysis..."):
             progress_bar = st.progress(0, "Initializing...")
@@ -375,12 +445,14 @@ def main():
         
         st.divider()
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
             "📍 POI Map",
             "🔵 Clusters",
             "🔥 Heatmaps",
             "⭐ Recommendations",
-            "📊 Data & Reports"
+            "🎯 Scenario Modeling",
+            "🌍 Multi-City",
+            "📊 Reports"
         ])
         
         with tab1:
@@ -461,12 +533,176 @@ def main():
                             st.write(f"Infrastructure: {row['infrastructure_score']:.3f}")
         
         with tab5:
-            st.subheader("Data Files & Analysis Reports")
+            st.subheader("What-If Scenario Modeling")
+            st.caption("Experiment with different weight configurations and compare results")
+            
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.markdown("### Create Scenario")
+                
+                scenario_name = st.text_input("Scenario Name", value=f"Scenario {len(st.session_state.saved_scenarios) + 1}")
+                
+                st.markdown("**Adjust Weights:**")
+                s_demand = st.slider("Scenario Demand", 0.0, 1.0, 0.4, 0.05, key="s_demand")
+                s_competition = st.slider("Scenario Competition", 0.0, 1.0, 0.3, 0.05, key="s_comp")
+                s_accessibility = st.slider("Scenario Accessibility", 0.0, 1.0, 0.2, 0.05, key="s_access")
+                s_infrastructure = st.slider("Scenario Infrastructure", 0.0, 1.0, 0.1, 0.05, key="s_infra")
+                
+                s_total = s_demand + s_competition + s_accessibility + s_infrastructure
+                scenario_weights = {
+                    'demand': s_demand / s_total,
+                    'competition': s_competition / s_total,
+                    'accessibility': s_accessibility / s_total,
+                    'infrastructure': s_infrastructure / s_total
+                }
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("🔍 Preview Scenario", use_container_width=True):
+                        with st.spinner("Calculating..."):
+                            preview_results = run_quick_rescore(scenario_weights)
+                            if preview_results is not None:
+                                st.session_state['preview_results'] = preview_results
+                
+                with col_b:
+                    if st.button("💾 Save Scenario", use_container_width=True):
+                        preview = st.session_state.get('preview_results')
+                        if preview is not None:
+                            save_scenario(scenario_name, scenario_weights, preview)
+                            st.success(f"Saved: {scenario_name}")
+                        else:
+                            current_top = st.session_state.top_locations
+                            save_scenario(scenario_name, scenario_weights, current_top)
+                            st.success(f"Saved: {scenario_name}")
+                
+                if 'preview_results' in st.session_state and st.session_state['preview_results'] is not None:
+                    st.markdown("**Preview Results:**")
+                    preview = st.session_state['preview_results']
+                    for i, row in preview.head(5).iterrows():
+                        st.write(f"#{int(row['rank'])} Score: {row['final_score']:.3f}")
+            
+            with col2:
+                st.markdown("### Saved Scenarios")
+                
+                if not st.session_state.saved_scenarios:
+                    st.info("No scenarios saved yet. Create and save scenarios to compare them.")
+                else:
+                    for i, scenario in enumerate(st.session_state.saved_scenarios):
+                        with st.container():
+                            st.markdown(f"""
+                            <div class="scenario-card">
+                                <b>{scenario['name']}</b><br/>
+                                <small>{scenario['timestamp']}</small><br/>
+                                Top Score: <b>{scenario['top_score']:.3f}</b><br/>
+                                Weights: D:{scenario['weights']['demand']:.0%} 
+                                C:{scenario['weights']['competition']:.0%}
+                                A:{scenario['weights']['accessibility']:.0%}
+                                I:{scenario['weights']['infrastructure']:.0%}
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    if len(st.session_state.saved_scenarios) >= 2:
+                        st.markdown("### Scenario Comparison")
+                        
+                        comparison_data = []
+                        for s in st.session_state.saved_scenarios:
+                            comparison_data.append({
+                                'Scenario': s['name'],
+                                'Top Score': s['top_score'],
+                                'Demand Wt': f"{s['weights']['demand']:.0%}",
+                                'Competition Wt': f"{s['weights']['competition']:.0%}"
+                            })
+                        
+                        st.dataframe(pd.DataFrame(comparison_data), hide_index=True)
+                    
+                    if st.button("🗑️ Clear All Scenarios"):
+                        st.session_state.saved_scenarios = []
+                        st.rerun()
+        
+        with tab6:
+            st.subheader("Multi-City Comparison")
+            st.caption("Compare analysis results across multiple cities for franchise expansion")
+            
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.markdown("### Add City to Comparison")
+                
+                compare_city = st.text_input("City to Add", value="Mumbai", key="compare_city")
+                compare_radius = st.slider("Radius (km)", 1.0, 20.0, 5.0, 0.5, key="compare_radius")
+                
+                if st.button("➕ Add City to Comparison", use_container_width=True):
+                    if compare_city:
+                        with st.spinner(f"Analyzing {compare_city}..."):
+                            progress = st.progress(0)
+                            compare_results = run_analysis_pipeline(
+                                compare_city, 
+                                results.get('business_type', 'cafe'),
+                                compare_radius,
+                                st.session_state.current_weights or weights,
+                                progress
+                            )
+                            if compare_results:
+                                st.session_state.multi_city_results[compare_city] = {
+                                    'results': compare_results,
+                                    'top_locations': compare_results.get('top_locations'),
+                                    'radius': compare_radius
+                                }
+                                st.success(f"Added {compare_city} to comparison!")
+                                st.rerun()
+                
+                current_city = st.session_state.current_city or results.get('city', 'Current')
+                if current_city not in st.session_state.multi_city_results:
+                    st.session_state.multi_city_results[current_city] = {
+                        'results': results,
+                        'top_locations': st.session_state.top_locations,
+                        'radius': results.get('radius_km', 5.0)
+                    }
+            
+            with col2:
+                st.markdown("### City Comparison Results")
+                
+                if st.session_state.multi_city_results:
+                    comparison_rows = []
+                    for city_name, data in st.session_state.multi_city_results.items():
+                        city_results = data['results']
+                        city_top = data['top_locations']
+                        
+                        top_score = 0
+                        if city_top is not None and len(city_top) > 0:
+                            top_score = city_top['final_score'].max()
+                        
+                        comparison_rows.append({
+                            'City': city_name,
+                            'POIs': city_results.get('cleaned_poi_count', 0),
+                            'Clusters': city_results.get('cluster_stats', {}).get('n_clusters', 0),
+                            'Competitors': city_results.get('scoring_report', {}).get('total_competitors', 0),
+                            'Top Score': f"{top_score:.3f}",
+                            'Radius': f"{data['radius']} km"
+                        })
+                    
+                    comparison_df = pd.DataFrame(comparison_rows)
+                    st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+                    
+                    st.markdown("### Best City Recommendation")
+                    if comparison_rows:
+                        best_city = max(comparison_rows, key=lambda x: float(x['Top Score']))
+                        st.success(f"🏆 **{best_city['City']}** has the highest opportunity score ({best_city['Top Score']})")
+                    
+                    if st.button("🗑️ Clear Comparison"):
+                        st.session_state.multi_city_results = {}
+                        st.rerun()
+                else:
+                    st.info("Add cities above to compare locations across multiple cities.")
+        
+        with tab7:
+            st.subheader("Data Files & Reports")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("**Download Data Files**")
+                st.markdown("### Download Data Files")
                 
                 if os.path.exists('data/cleaned_data.csv'):
                     with open('data/cleaned_data.csv', 'r') as f:
@@ -494,9 +730,35 @@ def main():
                             file_name="location_scores.csv",
                             mime="text/csv"
                         )
+                
+                st.markdown("### Generate PDF Report")
+                
+                if st.button("📄 Generate PDF Report", type="primary", use_container_width=True):
+                    with st.spinner("Generating PDF report..."):
+                        try:
+                            report_path = generate_pdf_report(
+                                results.get('city', st.session_state.current_city or 'Unknown'),
+                                results.get('business_type', 'cafe'),
+                                results.get('radius_km', 5.0),
+                                results,
+                                st.session_state.current_weights or weights,
+                                st.session_state.top_locations
+                            )
+                            st.success("PDF report generated!")
+                            
+                            if os.path.exists(report_path):
+                                with open(report_path, 'rb') as f:
+                                    st.download_button(
+                                        "📥 Download PDF Report",
+                                        f.read(),
+                                        file_name="business_location_analysis.pdf",
+                                        mime="application/pdf"
+                                    )
+                        except Exception as e:
+                            st.error(f"Error generating report: {e}")
             
             with col2:
-                st.markdown("**Analysis Summary**")
+                st.markdown("### Analysis Summary")
                 
                 scoring_report = results.get('scoring_report', {})
                 if scoring_report:
@@ -506,12 +768,13 @@ def main():
                     st.write(f"Top Score: {scoring_report.get('top_score', 0):.3f}")
                 
                 st.markdown("**Weights Used:**")
-                for key, value in weights.items():
+                current_weights = st.session_state.current_weights or weights
+                for key, value in current_weights.items():
                     st.write(f"  {key.title()}: {value:.2f}")
             
             st.divider()
             
-            st.markdown("**Location Scores Table**")
+            st.markdown("### Location Scores Table")
             if os.path.exists('data/location_scores.csv'):
                 scores_df = pd.read_csv('data/location_scores.csv')
                 st.dataframe(
@@ -548,7 +811,36 @@ def main():
             **3. Recommendations**
             - Ranked list of best locations
             - Interactive map visualization
-            - Downloadable reports
+            - PDF reports & scenario modeling
+            """)
+        
+        st.markdown("---")
+        
+        st.markdown("### New Features")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            **🎯 Scenario Modeling**
+            - Compare different weight configurations
+            - Save and compare scenarios
+            - What-if analysis
+            """)
+        
+        with col2:
+            st.markdown("""
+            **🌍 Multi-City Comparison**
+            - Analyze multiple cities
+            - Compare opportunities
+            - Franchise expansion planning
+            """)
+        
+        with col3:
+            st.markdown("""
+            **📄 PDF Reports**
+            - Executive summary
+            - Methodology documentation
+            - Top recommendations
             """)
         
         st.markdown("---")

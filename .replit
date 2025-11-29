@@ -2,7 +2,7 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["geos", "glibcLocales"]
+packages = ["freetype", "geos", "glibcLocales"]
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -37,5 +37,5 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 35015
+localPort = 40377
 externalPort = 3000
