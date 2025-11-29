@@ -529,22 +529,68 @@ class MapVisualizer:
         
         return colors
     
-    def save_map(self, m: folium.Map, filename: str) -> str:
-        """
-        Save map to HTML file.
-        
+    def save_map(self, fmap: folium.Map, filename: str) -> str:
+        """Save the folium map to HTML file.
+
         Args:
-            m: Folium Map object
+            fmap: Folium Map object
             filename: Output filename
-            
+
         Returns:
-            Path to saved file
+            Path to saved file or empty string on failure
         """
-        filepath = os.path.join('maps', filename)
-        m.save(filepath)
-        self.maps_created.append(filepath)
-        print(f"Saved map to {filepath}")
-        return filepath
+        path = os.path.join('maps', filename)
+        try:
+            fmap.save(path)
+            self.maps_created.append(path)
+            return path
+        except Exception as e:
+            print(f"Error saving map: {e}")
+            return ""
+
+    def save_static_scatter(self, gdf: gpd.GeoDataFrame, filename: str,
+                             color_by: str = None, center_lat: float = None,
+                             center_lon: float = None) -> str:
+        """Create a static scatter PNG for download (no browser rendering).
+
+        Args:
+            gdf: GeoDataFrame with latitude/longitude
+            filename: Output PNG name
+            color_by: Optional column to color points
+            center_lat/center_lon: Optional center marker
+
+        Returns:
+            File path to saved PNG or empty string if not generated
+        """
+        if 'latitude' not in gdf.columns or 'longitude' not in gdf.columns or len(gdf) == 0:
+            return ""
+        import matplotlib.pyplot as plt
+        path = os.path.join('maps', filename)
+        try:
+            fig, ax = plt.subplots(figsize=(8, 6))
+            if color_by and color_by in gdf.columns:
+                groups = gdf[color_by].fillna('unknown')
+                unique = groups.unique()
+                cmap = plt.get_cmap('tab20')
+                for i, u in enumerate(unique):
+                    subset = gdf[groups == u]
+                    ax.scatter(subset['longitude'], subset['latitude'], s=12,
+                               color=cmap(i % 20), alpha=0.6, label=str(u))
+                ax.legend(loc='upper right', fontsize='x-small', frameon=False)
+            else:
+                ax.scatter(gdf['longitude'], gdf['latitude'], s=12, alpha=0.6, color='#1f77b4')
+            if center_lat is not None and center_lon is not None:
+                ax.scatter([center_lon], [center_lat], c='red', s=60, marker='x')
+            ax.set_xlabel('Longitude')
+            ax.set_ylabel('Latitude')
+            ax.set_title('POI Distribution' if not color_by else f'POIs by {color_by}')
+            plt.tight_layout()
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            return path
+        except Exception as e:
+            print(f"Failed to save static scatter: {e}")
+            return ""
     
     def get_map_html(self, m: folium.Map) -> str:
         """

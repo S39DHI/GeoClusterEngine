@@ -154,13 +154,27 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     st.session_state.center = center
     
     progress_bar.progress(20, "Fetching POI data from OpenStreetMap...")
-    
-    categories = [
+
+    # Build POI categories to fetch
+    base_categories = [
         'shop', 'restaurant', 'cafe', 'supermarket', 'bank',
         'hospital', 'pharmacy', 'school', 'hotel', 'fuel',
-        'parking', 'bus_station', business_type
+        'parking', 'bus_station'
     ]
-    categories = list(set(categories))
+
+    is_best_mode = str(business_type).lower().strip() in [
+        'best recommendation', 'best_recommendation', 'best'
+    ]
+
+    if is_best_mode:
+        # Use profiles from recommendations module (no synthetic expansion)
+        from modules.recommendations import compute_business_recommendations
+        candidate_types = list(BUSINESS_PROFILES.keys()) if 'BUSINESS_PROFILES' in globals() else [
+            'cafe','restaurant','bakery','fast_food','shop','supermarket','pharmacy','bank','gym','hotel'
+        ]
+        categories = list(set(base_categories + candidate_types))
+    else:
+        categories = list(set(base_categories + [business_type]))
     
     all_pois = fetcher.fetch_all_pois(categories)
     
@@ -200,10 +214,26 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     results['hotspots'] = hotspots
     results['sparse_regions'] = sparse_regions
     
+    # If "Best Recommendation" mode, compute top business types first
+    selected_business = business_type
+    best_suggestions_records = None
+    if is_best_mode:
+        try:
+            from modules.recommendations import compute_business_recommendations
+            suggestions_df = compute_business_recommendations(
+                cleaned_pois, center[0], center[1], radius_km, weights
+            )
+            best_suggestions_records = suggestions_df.head(3).to_dict(orient='records')
+            if len(suggestions_df) > 0:
+                selected_business = str(suggestions_df.iloc[0]['Business Type']).lower()
+        except Exception as e:
+            st.warning(f"Best recommendation computation failed: {e}")
+            selected_business = 'cafe'
+
     progress_bar.progress(70, "Scoring potential locations...")
     scorer = LocationScorer(weights)
     
-    supporting_categories = fetcher.get_supporting_pois(business_type)
+    supporting_categories = fetcher.get_supporting_pois(selected_business)
     candidates = scorer.generate_candidate_locations(
         center[0], center[1],
         radius_km=radius_km,
@@ -213,7 +243,7 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     scores = scorer.score_locations(
         candidates,
         cleaned_pois,
-        business_type,
+        selected_business,
         supporting_categories
     )
     
@@ -222,6 +252,15 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     st.session_state.top_locations = top_locations
     results['top_locations'] = top_locations
     results['scoring_report'] = scorer.get_analysis_report()
+    # Record best-mode outputs
+    results['best_mode'] = is_best_mode
+    if best_suggestions_records is not None:
+        results['best_suggestions'] = best_suggestions_records
+    # Persist final business type used for scoring
+    results['business_type_used'] = selected_business
+    if is_best_mode:
+        # Align primary business type with what was actually used downstream
+        results['business_type'] = selected_business
     
     progress_bar.progress(85, "Generating maps...")
     viz = MapVisualizer(center[0], center[1], zoom_start=13)
@@ -229,30 +268,35 @@ def run_analysis_pipeline(city: str, business_type: str, radius_km: float,
     try:
         all_pois_map = viz.create_all_pois_map(cleaned_pois)
         viz.save_map(all_pois_map, 'all_pois_map.html')
+        # Static image
+        viz.save_static_scatter(cleaned_pois, 'all_pois_map.png', center_lat=center[0], center_lon=center[1])
     except Exception as e:
         st.warning(f"Could not generate POI map: {e}")
     
     try:
         cluster_map = viz.create_cluster_map(clustered_pois, clusterer.cluster_stats)
         viz.save_map(cluster_map, 'cluster_map.html')
+        viz.save_static_scatter(clustered_pois, 'cluster_map.png', color_by='cluster', center_lat=center[0], center_lon=center[1])
     except Exception as e:
         st.warning(f"Could not generate cluster map: {e}")
     
     try:
         heatmap = viz.create_heatmap(cleaned_pois)
         viz.save_map(heatmap, 'heatmap.html')
+        # For heatmap static, approximate with scatter (density is implicit)
+        viz.save_static_scatter(cleaned_pois, 'heatmap.png', center_lat=center[0], center_lon=center[1])
     except Exception as e:
         st.warning(f"Could not generate heatmap: {e}")
     
     try:
-        competition_map = viz.create_competition_heatmap(cleaned_pois, business_type)
+        competition_map = viz.create_competition_heatmap(cleaned_pois, selected_business)
         viz.save_map(competition_map, 'competition_heatmap.html')
     except Exception as e:
         st.warning(f"Could not generate competition heatmap: {e}")
     
     try:
         recommendations_map = viz.create_recommendations_map(
-            cleaned_pois, top_locations, business_type
+            cleaned_pois, top_locations, selected_business
         )
         viz.save_map(recommendations_map, 'recommendations_map.html')
     except Exception as e:
@@ -421,7 +465,7 @@ def main():
         
         business_options = [
             'cafe', 'restaurant', 'shop', 'supermarket', 'pharmacy',
-            'gym', 'hotel', 'bakery', 'fast_food', 'bank'
+            'gym', 'hotel', 'bakery', 'fast_food', 'bank', 'Best Recommendation'
         ]
         business_type = st.selectbox(
             "Business Type",
@@ -511,6 +555,18 @@ def main():
             st.subheader("All Points of Interest")
             st.caption("Interactive map showing all fetched POIs with marker clustering")
             render_map_from_file('maps/all_pois_map.html', height=600)
+            # Download buttons
+            col_dl1, col_dl2 = st.columns([1,1])
+            with col_dl1:
+                try:
+                    with open('maps/all_pois_map.html','r',encoding='utf-8') as f:
+                        st.download_button(label="Download HTML", data=f.read(), file_name='all_pois_map.html', mime='text/html')
+                except: pass
+            with col_dl2:
+                try:
+                    with open('maps/all_pois_map.png','rb') as f:
+                        st.download_button(label="Download PNG", data=f.read(), file_name='all_pois_map.png', mime='image/png')
+                except: pass
         
         with tab2:
             st.subheader("Cluster Analysis")
@@ -519,6 +575,17 @@ def main():
             
             with col1:
                 render_map_from_file('maps/cluster_map.html', height=500)
+                dlc1, dlc2 = st.columns([1,1])
+                with dlc1:
+                    try:
+                        with open('maps/cluster_map.html','r',encoding='utf-8') as f:
+                            st.download_button("HTML", f.read(), file_name='cluster_map.html', mime='text/html')
+                    except: pass
+                with dlc2:
+                    try:
+                        with open('maps/cluster_map.png','rb') as f:
+                            st.download_button("PNG", f.read(), file_name='cluster_map.png', mime='image/png')
+                    except: pass
             
             with col2:
                 st.markdown("**Cluster Statistics**")
@@ -549,11 +616,63 @@ def main():
             
             if heatmap_type == "POI Density":
                 render_map_from_file('maps/heatmap.html', height=550)
+                dh1, dh2 = st.columns([1,1])
+                with dh1:
+                    try:
+                        with open('maps/heatmap.html','r',encoding='utf-8') as f:
+                            st.download_button("HTML", f.read(), file_name='heatmap.html', mime='text/html')
+                    except: pass
+                with dh2:
+                    try:
+                        with open('maps/heatmap.png','rb') as f:
+                            st.download_button("PNG", f.read(), file_name='heatmap.png', mime='image/png')
+                    except: pass
             else:
                 render_map_from_file('maps/competition_heatmap.html', height=550)
+                ch1, ch2 = st.columns([1,1])
+                with ch1:
+                    try:
+                        with open('maps/competition_heatmap.html','r',encoding='utf-8') as f:
+                            st.download_button("HTML", f.read(), file_name='competition_heatmap.html', mime='text/html')
+                    except: pass
+                with ch2:
+                    try:
+                        # No dedicated PNG; reuse heatmap if desired
+                        if os.path.exists('maps/heatmap.png'):
+                            with open('maps/heatmap.png','rb') as f:
+                                st.download_button("PNG", f.read(), file_name='competition_heatmap.png', mime='image/png')
+                    except: pass
         
         with tab4:
             st.subheader("Top Recommended Locations")
+
+            # If in Best Recommendation mode, show top-3 business types
+            if results.get('best_mode') and results.get('best_suggestions'):
+                st.markdown("**Top Business Types for This Area**")
+                best_df = pd.DataFrame(results['best_suggestions'])
+                st.dataframe(best_df, hide_index=True, use_container_width=True)
+
+                # Allow quick re-score by choosing among top-3 types
+                suggestion_names = [r.get('Business Type', '') for r in results['best_suggestions']]
+                chosen = st.selectbox(
+                    "Re-score with one of the top business types",
+                    options=suggestion_names,
+                    index=0 if suggestion_names else None,
+                    key="best_reco_pick"
+                )
+                if chosen:
+                    col_rescore_a, col_rescore_b = st.columns([1,1])
+                    with col_rescore_a:
+                        if st.button("🔄 Re-score with selected type", use_container_width=True, key="rescore_best_pick"):
+                            # Update current selection and re-score quickly
+                            st.session_state.results['business_type'] = chosen.lower()
+                            st.session_state.current_business = chosen.lower()
+                            with st.spinner("Re-scoring for selected business type..."):
+                                new_top = run_quick_rescore(st.session_state.current_weights)
+                                if new_top is not None:
+                                    st.session_state.top_locations = new_top
+                                    st.session_state.results['top_locations'] = new_top
+                                    st.rerun()
             
             col1, col2 = st.columns([2, 1])
             
