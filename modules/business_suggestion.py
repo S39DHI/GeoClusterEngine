@@ -4,6 +4,8 @@ Recommends suitable business types for a given location
 """
 
 import pandas as pd
+import numpy as np
+import random
 from modules.clean_data import DataCleaner
 from modules.scoring import LocationScorer
 
@@ -56,60 +58,85 @@ class BusinessSuggester:
         
         for business_type in self.BUSINESS_TYPES:
             try:
-                # Create scorer for this business type
-                scorer = LocationScorer(weights)
+                # Get local POIs around the target location
+                local_pois = self._get_nearby_pois(lat, lon, radius_km)
                 
-                # Get supporting POIs for this business type
-                from modules.fetch_data import DataFetcher
-                fetcher = DataFetcher("", radius_km)
-                supporting_categories = fetcher.get_supporting_pois(business_type)
+                # Count businesses of this type (competition)
+                business_pois = local_pois[
+                    local_pois['category'].str.contains(business_type, case=False, na=False)
+                ] if 'category' in local_pois.columns else pd.DataFrame()
                 
-                # Score just this one location
-                candidates = pd.DataFrame([{
-                    'latitude': lat,
-                    'longitude': lon
-                }])
+                competition_density = len(business_pois)
                 
-                scores = scorer.score_locations(
-                    candidates,
-                    self.cleaned_pois,
-                    business_type,
-                    supporting_categories,
-                    radius_km=radius_km
+                # Calculate demand score based on nearby supporting POIs
+                demand_score = self._calculate_demand_score(local_pois, business_type)
+                
+                # Calculate competition score (inverse - fewer competitors = higher score)
+                competition_score = max(0, 1.0 - (competition_density / max(1, len(local_pois))))
+                
+                # Calculate accessibility score based on transport/infrastructure
+                accessibility_score = self._calculate_accessibility_score(local_pois)
+                
+                # Calculate infrastructure score
+                infrastructure_score = self._calculate_infrastructure_score(local_pois)
+                
+                # Compute overall viability score
+                viability_score = (
+                    weights['demand'] * demand_score +
+                    weights['competition'] * competition_score +
+                    weights['accessibility'] * accessibility_score +
+                    weights['infrastructure'] * infrastructure_score
                 )
                 
-                if len(scores) > 0:
-                    score_row = scores.iloc[0]
-                    
-                    # Calculate local competition density
-                    local_pois = self._get_nearby_pois(lat, lon, 0.5)
+                suggestions.append({
+                    'Business Type': business_type.title(),
+                    'Viability Score': float(viability_score),
+                    'Demand': float(demand_score),
+                    'Competition': float(competition_score),
+                    'Accessibility': float(accessibility_score),
+                    'Infrastructure': float(infrastructure_score),
+                    'Local Competitors': competition_density,
+                    'Category': business_type
+                })
+            except Exception as e:
+                # If scoring fails for a business type, try simplified scoring
+                try:
+                    local_pois = self._get_nearby_pois(lat, lon, radius_km)
                     business_pois = local_pois[
                         local_pois['category'].str.contains(business_type, case=False, na=False)
-                    ]
+                    ] if 'category' in local_pois.columns else pd.DataFrame()
+                    
                     competition_density = len(business_pois)
+                    poi_density = len(local_pois) / max(1, radius_km)
+                    
+                    # Simple scoring based on POI density and competition
+                    demand_score = min(1.0, poi_density / 50.0)
+                    competition_score = max(0, 1.0 - (competition_density / max(1, len(local_pois))))
+                    
+                    viability_score = 0.5 * demand_score + 0.5 * competition_score
                     
                     suggestions.append({
                         'Business Type': business_type.title(),
-                        'Viability Score': float(score_row['final_score']),
-                        'Demand': float(score_row['demand_score']),
-                        'Competition': float(score_row['competition_score']),
-                        'Accessibility': float(score_row['accessibility_score']),
-                        'Infrastructure': float(score_row['infrastructure_score']),
+                        'Viability Score': float(viability_score),
+                        'Demand': float(demand_score),
+                        'Competition': float(competition_score),
+                        'Accessibility': 0.5,
+                        'Infrastructure': 0.5,
                         'Local Competitors': competition_density,
                         'Category': business_type
                     })
-            except Exception as e:
-                # If scoring fails for a business type, assign a default low score
-                suggestions.append({
-                    'Business Type': business_type.title(),
-                    'Viability Score': 0.0,
-                    'Demand': 0.0,
-                    'Competition': 0.0,
-                    'Accessibility': 0.0,
-                    'Infrastructure': 0.0,
-                    'Local Competitors': 0,
-                    'Category': business_type
-                })
+                except:
+                    # Final fallback
+                    suggestions.append({
+                        'Business Type': business_type.title(),
+                        'Viability Score': 0.0,
+                        'Demand': 0.0,
+                        'Competition': 0.0,
+                        'Accessibility': 0.0,
+                        'Infrastructure': 0.0,
+                        'Local Competitors': 0,
+                        'Category': business_type
+                    })
         
         # Create DataFrame and sort by viability
         results = pd.DataFrame(suggestions)
@@ -134,6 +161,9 @@ class BusinessSuggester:
         """
         from scipy.spatial.distance import haversine
         
+        if len(self.cleaned_pois) == 0:
+            return pd.DataFrame()
+        
         distances = self.cleaned_pois.apply(
             lambda row: haversine(
                 (lat, lon),
@@ -143,6 +173,87 @@ class BusinessSuggester:
         )
         
         return self.cleaned_pois[distances <= radius_km].copy()
+    
+    def _calculate_demand_score(self, local_pois: pd.DataFrame, business_type: str) -> float:
+        """
+        Calculate demand score based on supporting POIs.
+        
+        Args:
+            local_pois: POIs in the local area
+            business_type: Type of business
+            
+        Returns:
+            Demand score between 0-1
+        """
+        if len(local_pois) == 0:
+            return 0.0
+        
+        from modules.fetch_data import DataFetcher
+        fetcher = DataFetcher("", 1.0)
+        supporting = fetcher.get_supporting_pois(business_type)
+        
+        # Count supporting POIs
+        supporting_count = 0
+        for cat in supporting:
+            count = len(local_pois[
+                local_pois['category'].str.contains(cat, case=False, na=False)
+            ]) if 'category' in local_pois.columns else 0
+            supporting_count += count
+        
+        # Normalize to 0-1 scale
+        demand_score = min(1.0, supporting_count / max(1, len(supporting)))
+        return demand_score
+    
+    def _calculate_accessibility_score(self, local_pois: pd.DataFrame) -> float:
+        """
+        Calculate accessibility score based on transport/parking POIs.
+        
+        Args:
+            local_pois: POIs in the local area
+            
+        Returns:
+            Accessibility score between 0-1
+        """
+        if len(local_pois) == 0:
+            return 0.0
+        
+        transport_keywords = ['bus', 'station', 'parking', 'fuel', 'transport']
+        transport_pois = 0
+        
+        if 'category' in local_pois.columns:
+            for keyword in transport_keywords:
+                transport_pois += len(local_pois[
+                    local_pois['category'].str.contains(keyword, case=False, na=False)
+                ])
+        
+        accessibility_score = min(1.0, transport_pois / max(1, len(local_pois)))
+        return accessibility_score
+    
+    def _calculate_infrastructure_score(self, local_pois: pd.DataFrame) -> float:
+        """
+        Calculate infrastructure score based on essential services.
+        
+        Args:
+            local_pois: POIs in the local area
+            
+        Returns:
+            Infrastructure score between 0-1
+        """
+        if len(local_pois) == 0:
+            return 0.0
+        
+        infrastructure_keywords = ['hospital', 'school', 'bank', 'pharmacy']
+        infra_pois = 0
+        
+        if 'category' in local_pois.columns:
+            for keyword in infrastructure_keywords:
+                infra_pois += len(local_pois[
+                    local_pois['category'].str.contains(keyword, case=False, na=False)
+                ])
+        
+        infrastructure_score = min(1.0, infra_pois / max(1, len(local_pois)))
+        return infrastructure_score
+
     
     def get_recommendation_summary(self, suggestions: pd.DataFrame) -> str:
         """
@@ -187,3 +298,59 @@ class BusinessSuggester:
         summary.append("=" * 60)
         
         return "\n".join(summary)
+
+
+def optimize_location(initial_point: tuple, scoring_fn, step: float = 0.0005, 
+                     iterations: int = 300) -> tuple:
+    """
+    Find optimal business location using gradient-free optimization.
+    Uses local search/hill climbing with random perturbations.
+    
+    Args:
+        initial_point: Starting (lat, lon) tuple
+        scoring_fn: Function that takes (lat, lon) and returns score
+        step: Maximum perturbation distance per iteration
+        iterations: Number of optimization iterations
+        
+    Returns:
+        Tuple of (optimal_point, best_score)
+    """
+    best = np.array(initial_point)
+    best_score = scoring_fn(best)
+    
+    for i in range(iterations):
+        # Random perturbation
+        perturbation = np.random.uniform(-step, step, size=2)
+        candidate = best + perturbation
+        
+        score = scoring_fn(candidate)
+        
+        # Accept if better
+        if score > best_score:
+            best = candidate
+            best_score = score
+    
+    return tuple(best), best_score
+
+
+def predict_counterfactual_effect(point: tuple, business_type: str, 
+                                 features: dict) -> float:
+    """
+    Predict the impact of opening a business at a location.
+    Counterfactual: "What if we open here?"
+    
+    Args:
+        point: (lat, lon) coordinate
+        business_type: Type of business
+        features: Dictionary with feature values (footfall, competition, transit, etc.)
+        
+    Returns:
+        Predicted change in local market score
+    """
+    predicted_change = (
+        features.get("footfall", 0) * 0.1 -
+        features.get("competition", 0) * 0.05 +
+        features.get("transit", 0) * 0.02
+    )
+    
+    return predicted_change

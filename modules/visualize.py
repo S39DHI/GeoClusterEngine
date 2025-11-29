@@ -11,6 +11,7 @@ import folium
 from folium import plugins
 from folium.plugins import MarkerCluster, HeatMap
 from scipy import stats
+import matplotlib.pyplot as plt
 
 
 class MapVisualizer:
@@ -556,3 +557,69 @@ class MapVisualizer:
             HTML string
         """
         return m._repr_html_()
+
+
+def visualize_timelapse(kde_frames: list) -> list:
+    """
+    Generate timelapse animation frames from KDE density heatmaps.
+    
+    Args:
+        kde_frames: List of KDE density arrays over time
+        
+    Returns:
+        List of image arrays for UI display
+    """
+    if not kde_frames:
+        return []
+    
+    image_list = []
+    
+    for frame in kde_frames:
+        if frame is None:
+            continue
+        
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.contourf(frame, levels=15, cmap='YlOrRd')
+        ax.set_title("Density Heatmap - Time Series")
+        plt.colorbar(im, ax=ax)
+        
+        # Convert to image array (placeholder)
+        image_list.append(fig)
+        plt.close(fig)
+    
+    return image_list
+
+
+def plot_heatmap(xx: np.ndarray, yy: np.ndarray, zz: np.ndarray) -> plt.Figure:
+    """
+    Plot a 2D heatmap from KDE data.
+    
+    Args:
+        xx: X-axis grid
+        yy: Y-axis grid
+        zz: Density values
+        
+    Returns:
+        Matplotlib Figure object
+    """
+    if xx is None or yy is None or zz is None:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No data available for heatmap")
+        return fig
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Create contourf plot
+    contour = ax.contourf(xx, yy, zz, levels=20, cmap='viridis')
+    
+    # Add contour lines
+    ax.contour(xx, yy, zz, levels=10, colors='black', alpha=0.3, linewidths=0.5)
+    
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.set_title("Location Density Heatmap")
+    
+    cbar = plt.colorbar(contour, ax=ax)
+    cbar.set_label("Density")
+    
+    return fig

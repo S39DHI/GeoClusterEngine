@@ -17,7 +17,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_80f9c1089f9d08847126fcff0b66045f {
+                #map_f41aa33653fcbe7c2d025d8fe297fd61 {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -50,21 +50,20 @@
             </script>
 
         
-    <script src="https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js"></script>
 </head>
 <body>
     
     
-            <div class="folium-map" id="map_80f9c1089f9d08847126fcff0b66045f" ></div>
+            <div class="folium-map" id="map_f41aa33653fcbe7c2d025d8fe297fd61" ></div>
         
 </body>
 <script>
     
     
-            var map_80f9c1089f9d08847126fcff0b66045f = L.map(
-                "map_80f9c1089f9d08847126fcff0b66045f",
+            var map_f41aa33653fcbe7c2d025d8fe297fd61 = L.map(
+                "map_f41aa33653fcbe7c2d025d8fe297fd61",
                 {
-                    center: [12.3035086, 76.2928095],
+                    center: [12.9767936, 77.590082],
                     crs: L.CRS.EPSG3857,
                     ...{
   "zoom": 13,
@@ -79,7 +78,7 @@
 
         
     
-            var tile_layer_9db83bc45095b2223eeb68cd4256291b = L.tileLayer(
+            var tile_layer_2e271ea09e402a984f6cba0b0a3f1a01 = L.tileLayer(
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                 {
   "minZoom": 0,
@@ -96,10 +95,10 @@
             );
         
     
-            tile_layer_9db83bc45095b2223eeb68cd4256291b.addTo(map_80f9c1089f9d08847126fcff0b66045f);
+            tile_layer_2e271ea09e402a984f6cba0b0a3f1a01.addTo(map_f41aa33653fcbe7c2d025d8fe297fd61);
         
     
-            var tile_layer_a4e8d2f28d9db70ca453c84ff47aba72 = L.tileLayer(
+            var tile_layer_69df1e32baa4820506adf69169b1dce6 = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
                 {
   "minZoom": 0,
@@ -116,10 +115,10 @@
             );
         
     
-            tile_layer_a4e8d2f28d9db70ca453c84ff47aba72.addTo(map_80f9c1089f9d08847126fcff0b66045f);
+            tile_layer_69df1e32baa4820506adf69169b1dce6.addTo(map_f41aa33653fcbe7c2d025d8fe297fd61);
         
     
-            var tile_layer_333d232db758237d8aaaf513e33d39b5 = L.tileLayer(
+            var tile_layer_dcd04729e05d3fd7b75e3b3c7487dd83 = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
                 {
   "minZoom": 0,
@@ -136,80 +135,27 @@
             );
         
     
-            tile_layer_333d232db758237d8aaaf513e33d39b5.addTo(map_80f9c1089f9d08847126fcff0b66045f);
+            tile_layer_dcd04729e05d3fd7b75e3b3c7487dd83.addTo(map_f41aa33653fcbe7c2d025d8fe297fd61);
         
     
-            var heat_map_56cbc061d8c7695fee5dca9ef54072de = L.heatLayer(
-                [[12.3090981, 76.2845856, 1], [12.308939, 76.291837, 1]],
-                {
-  "minOpacity": 0.5,
-  "maxZoom": 18,
-  "radius": 20,
-  "blur": 15,
-  "gradient": {
-  0.2: "green",
-  0.5: "yellow",
-  0.8: "orange",
-  1: "red",
-},
-}
-            );
-        
-    
-            heat_map_56cbc061d8c7695fee5dca9ef54072de.addTo(map_80f9c1089f9d08847126fcff0b66045f);
-        
-    
-            var circle_marker_19dbe6282d8131fbfd60d074d29accb9 = L.circleMarker(
-                [12.3090981, 76.2845856],
-                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.5, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 5, "stroke": true, "weight": 3}
-            ).addTo(map_80f9c1089f9d08847126fcff0b66045f);
-        
-    
-            circle_marker_19dbe6282d8131fbfd60d074d29accb9.bindTooltip(
-                `<div>
-                     Hotel Devishree Prasad
-                 </div>`,
-                {
-  "sticky": true,
-}
-            );
-        
-    
-            var circle_marker_a9d23009a6d86582c1fdd6619711f3df = L.circleMarker(
-                [12.308939, 76.291837],
-                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.5, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 5, "stroke": true, "weight": 3}
-            ).addTo(map_80f9c1089f9d08847126fcff0b66045f);
-        
-    
-            circle_marker_a9d23009a6d86582c1fdd6619711f3df.bindTooltip(
-                `<div>
-                     Mallikarjuna boarding and lodging
-                 </div>`,
-                {
-  "sticky": true,
-}
-            );
-        
-    
-            var layer_control_09ca1284cc38592d620ba483e2626aab_layers = {
+            var layer_control_1aa6241fc83f54cc453c681f47b7c6f0_layers = {
                 base_layers : {
-                    "openstreetmap" : tile_layer_9db83bc45095b2223eeb68cd4256291b,
-                    "Light Mode" : tile_layer_a4e8d2f28d9db70ca453c84ff47aba72,
-                    "Dark Mode" : tile_layer_333d232db758237d8aaaf513e33d39b5,
+                    "openstreetmap" : tile_layer_2e271ea09e402a984f6cba0b0a3f1a01,
+                    "Light Mode" : tile_layer_69df1e32baa4820506adf69169b1dce6,
+                    "Dark Mode" : tile_layer_dcd04729e05d3fd7b75e3b3c7487dd83,
                 },
                 overlays :  {
-                    "hotel Competition" : heat_map_56cbc061d8c7695fee5dca9ef54072de,
                 },
             };
-            let layer_control_09ca1284cc38592d620ba483e2626aab = L.control.layers(
-                layer_control_09ca1284cc38592d620ba483e2626aab_layers.base_layers,
-                layer_control_09ca1284cc38592d620ba483e2626aab_layers.overlays,
+            let layer_control_1aa6241fc83f54cc453c681f47b7c6f0 = L.control.layers(
+                layer_control_1aa6241fc83f54cc453c681f47b7c6f0_layers.base_layers,
+                layer_control_1aa6241fc83f54cc453c681f47b7c6f0_layers.overlays,
                 {
   "position": "topright",
   "collapsed": true,
   "autoZIndex": true,
 }
-            ).addTo(map_80f9c1089f9d08847126fcff0b66045f);
+            ).addTo(map_f41aa33653fcbe7c2d025d8fe297fd61);
 
         
 </script>

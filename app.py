@@ -29,6 +29,10 @@ from modules.visualize import MapVisualizer
 from modules.scoring import LocationScorer
 from modules.report_generator import ReportGenerator
 from modules.business_suggestion import BusinessSuggester
+from modules.simulation import run_simulation, generate_agents, analyze_simulation_results
+from modules.clustering import compute_kde, smooth_heatmap
+from modules.scoring import compute_opportunity_score, compute_confidence
+from modules.visualize import plot_heatmap
 
 
 os.makedirs('data', exist_ok=True)
@@ -446,14 +450,13 @@ def main():
         
         st.divider()
         
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
             "📍 POI Map",
             "🔵 Clusters",
             "🔥 Heatmaps",
             "⭐ Recommendations",
             "🎯 Scenario Modeling",
             "🌍 Multi-City",
-            "📍 Location Analysis",
             "📊 Reports"
         ])
         
@@ -699,94 +702,6 @@ def main():
                     st.info("Add cities above to compare locations across multiple cities.")
         
         with tab7:
-            st.subheader("What Businesses Can I Open Here?")
-            st.caption("Analyze a specific location and discover the best business opportunities")
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.markdown("### Enter Location Coordinates")
-                
-                loc_lat = st.number_input(
-                    "Latitude",
-                    value=st.session_state.center[0] if st.session_state.center else 0.0,
-                    format="%.5f",
-                    help="Latitude of the location to analyze"
-                )
-                
-                loc_lon = st.number_input(
-                    "Longitude",
-                    value=st.session_state.center[1] if st.session_state.center else 0.0,
-                    format="%.5f",
-                    help="Longitude of the location to analyze"
-                )
-                
-                loc_radius = st.slider(
-                    "Analysis Radius (km)",
-                    min_value=0.5,
-                    max_value=5.0,
-                    value=1.0,
-                    step=0.1,
-                    help="Radius around the location to analyze"
-                )
-                
-                if st.button("🔍 Analyze Location", use_container_width=True, type="primary"):
-                    if st.session_state.cleaned_pois is not None:
-                        with st.spinner("Analyzing location..."):
-                            try:
-                                suggester = BusinessSuggester(
-                                    st.session_state.cleaned_pois,
-                                    st.session_state.center[0],
-                                    st.session_state.center[1]
-                                )
-                                
-                                suggestions = suggester.suggest_businesses_at_location(
-                                    loc_lat, loc_lon, loc_radius
-                                )
-                                
-                                st.session_state['location_suggestions'] = suggestions
-                                st.session_state['location_summary'] = suggester.get_recommendation_summary(suggestions)
-                                st.success("Analysis complete!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error analyzing location: {e}")
-                    else:
-                        st.warning("Please run an analysis first to get POI data")
-            
-            with col2:
-                st.markdown("### Business Recommendations")
-                
-                if 'location_suggestions' in st.session_state:
-                    suggestions = st.session_state['location_suggestions']
-                    
-                    if len(suggestions) > 0:
-                        # Show top 3 visually
-                        for idx, row in suggestions.head(3).iterrows():
-                            medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
-                            with st.container():
-                                st.markdown(f"""
-                                <div style="background-color: #e8f4f8; padding: 1rem; border-radius: 0.5rem; margin-bottom: 0.5rem; border-left: 4px solid #1f77b4;">
-                                    <b>{medal} {row['Business Type']}</b><br/>
-                                    Viability Score: <b>{row['Viability Score']:.3f}</b>/1.0<br/>
-                                    <small>Demand: {row['Demand']:.2f} | Competition: {row['Competition']:.2f} | Access: {row['Accessibility']:.2f}</small>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        st.divider()
-                        
-                        st.markdown("### All Business Options")
-                        st.dataframe(
-                            suggestions.drop(columns=['Business Type'], errors='ignore') if 'Business Type' in suggestions.columns else suggestions,
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                        
-                        st.markdown("### Summary")
-                        st.info(st.session_state.get('location_summary', ''))
-                else:
-                    st.info("Enter coordinates and click 'Analyze Location' to see business recommendations.")
-        
-        with tab8:
             st.subheader("Data Files & Reports")
             
             col1, col2 = st.columns(2)
@@ -795,7 +710,7 @@ def main():
                 st.markdown("### Download Data Files")
                 
                 if os.path.exists('data/cleaned_data.csv'):
-                    with open('data/cleaned_data.csv', 'r') as f:
+                    with open('data/cleaned_data.csv', 'r', encoding='utf-8') as f:
                         st.download_button(
                             "📥 Download Cleaned POIs",
                             f.read(),
@@ -804,7 +719,7 @@ def main():
                         )
                 
                 if os.path.exists('data/clusters.csv'):
-                    with open('data/clusters.csv', 'r') as f:
+                    with open('data/clusters.csv', 'r', encoding='utf-8') as f:
                         st.download_button(
                             "📥 Download Clusters",
                             f.read(),
@@ -813,7 +728,7 @@ def main():
                         )
                 
                 if os.path.exists('data/location_scores.csv'):
-                    with open('data/location_scores.csv', 'r') as f:
+                    with open('data/location_scores.csv', 'r', encoding='utf-8') as f:
                         st.download_button(
                             "📥 Download Location Scores",
                             f.read(),
@@ -872,6 +787,209 @@ def main():
                     use_container_width=True,
                     hide_index=True
                 )
+            
+            # ========== NEW ADVANCED FEATURES SECTION ==========
+            st.divider()
+            st.markdown("## 🚀 Advanced Features")
+            
+            # Create tabs for advanced features
+            adv_tab1, adv_tab2, adv_tab3, adv_tab4 = st.tabs(
+                ["Opportunity Scoring", "KDE Heatmap", "Agent Simulation", "Counterfactual Analysis"]
+            )
+            
+            # ===== Tab 1: Opportunity Scoring =====
+            with adv_tab1:
+                st.markdown("### Weighted Opportunity Score Engine")
+                st.write("Compute composite opportunity scores with custom feature weights.")
+                
+                col_opp1, col_opp2, col_opp3 = st.columns(3)
+                with col_opp1:
+                    footfall_w = st.slider("Footfall Weight", 0.0, 1.0, 0.25, key="opp_footfall")
+                    income_w = st.slider("Income Weight", 0.0, 1.0, 0.20, key="opp_income")
+                
+                with col_opp2:
+                    competition_w = st.slider("Competition Weight", 0.0, 1.0, -0.20, key="opp_comp")
+                    transit_w = st.slider("Transit Weight", 0.0, 1.0, 0.15, key="opp_transit")
+                
+                with col_opp3:
+                    safety_w = st.slider("Safety Weight", 0.0, 1.0, 0.10, key="opp_safety")
+                    rent_w = st.slider("Rent Weight", 0.0, 1.0, -0.10, key="opp_rent")
+                
+                if st.button("Calculate Opportunity Score", key="calc_opp"):
+                    features = {
+                        "footfall": footfall_w * 100,
+                        "income": income_w * 100,
+                        "competition": competition_w * 100,
+                        "transit": transit_w * 100,
+                        "safety": safety_w * 100,
+                        "rent": rent_w * 100
+                    }
+                    
+                    weights = {
+                        "footfall": footfall_w,
+                        "income": income_w,
+                        "competition": competition_w,
+                        "transit": transit_w,
+                        "safety": safety_w,
+                        "rent": rent_w
+                    }
+                    
+                    opp_score = compute_opportunity_score(features, weights)
+                    
+                    col_left, col_right = st.columns(2)
+                    with col_left:
+                        st.metric("Opportunity Score", f"{opp_score:.2f}/100")
+                    
+                    with col_right:
+                        # Compute confidence
+                        data_density = 0.8
+                        noise_level = 0.2
+                        confidence = compute_confidence(data_density, noise_level)
+                        st.metric("Confidence Score", f"{confidence:.2f}/1.0")
+            
+            # ===== Tab 2: KDE Heatmap =====
+            with adv_tab2:
+                st.markdown("### Kernel Density Estimation Heatmap")
+                st.write("Visualize POI density with smooth Gaussian smoothing.")
+                
+                if st.session_state.cleaned_pois is not None and len(st.session_state.cleaned_pois) > 0:
+                    col_kde1, col_kde2 = st.columns(2)
+                    
+                    with col_kde1:
+                        kde_bandwidth = st.slider("KDE Bandwidth", 0.001, 0.1, 0.01, key="kde_bw")
+                        grid_size_kde = st.slider("Grid Size", 50, 300, 150, key="grid_kde")
+                    
+                    with col_kde2:
+                        smooth_sigma = st.slider("Smoothing Sigma", 0.5, 10.0, 2.0, key="smooth_sigma")
+                    
+                    if st.button("Generate KDE Heatmap", key="gen_kde"):
+                        with st.spinner("Computing KDE heatmap..."):
+                            try:
+                                points = st.session_state.cleaned_pois[['latitude', 'longitude']].values
+                                xx, yy, zz = compute_kde(points, bandwidth=kde_bandwidth, grid_size=grid_size_kde)
+                                
+                                if xx is not None and yy is not None and zz is not None:
+                                    zz_smooth = smooth_heatmap(zz, sigma=smooth_sigma)
+                                    fig = plot_heatmap(xx, yy, zz_smooth)
+                                    st.pyplot(fig)
+                                    st.success("KDE heatmap generated successfully!")
+                            except Exception as e:
+                                st.error(f"Error generating heatmap: {e}")
+                else:
+                    st.info("Run analysis first to enable KDE heatmap generation.")
+            
+            # ===== Tab 3: Agent-Based Simulation =====
+            with adv_tab3:
+                st.markdown("### Agent-Based Simulation")
+                st.write("Simulate customer attraction and business viability using multi-agent simulation.")
+                
+                col_sim1, col_sim2 = st.columns(2)
+                
+                with col_sim1:
+                    pop_size = st.slider("Population Size", 10, 500, 100, step=10, key="sim_pop")
+                    income_dist = st.selectbox("Income Distribution", 
+                                             ["normal", "uniform", "skewed"], key="sim_income")
+                
+                with col_sim2:
+                    sim_steps = st.slider("Simulation Steps", 10, 200, 100, step=10, key="sim_steps")
+                
+                if st.button("Run Simulation", key="run_sim"):
+                    with st.spinner("Running simulation..."):
+                        try:
+                            agents = generate_agents(pop_size, income_dist)
+                            business_types = ['cafe', 'restaurant', 'shop', 'supermarket', 'gym']
+                            
+                            if st.session_state.center:
+                                location = st.session_state.center
+                                sim_results = run_simulation(location, agents, business_types, sim_steps)
+                                
+                                # Display results
+                                st.markdown("#### Simulation Results")
+                                
+                                col_sim_l, col_sim_r = st.columns(2)
+                                with col_sim_l:
+                                    st.metric("Average Satisfaction", 
+                                            f"{sim_results.get('average_satisfaction', 0):.2f}")
+                                    st.metric("Predicted Revenue", 
+                                            f"${sim_results.get('predicted_revenue', 0):.2f}")
+                                
+                                with col_sim_r:
+                                    st.metric("Total Attraction Score", 
+                                            f"{sim_results.get('total_attraction', 0):.2f}")
+                                
+                                # Business scores
+                                st.markdown("#### Business Type Viability")
+                                biz_data = []
+                                for biz, scores in sim_results.get('business_scores', {}).items():
+                                    biz_data.append({
+                                        'Business Type': biz.title(),
+                                        'Attraction': scores.get('total_attraction', 0),
+                                        'Satisfaction': scores.get('satisfaction_score', 0),
+                                        'Viability': scores.get('viability', 'unknown')
+                                    })
+                                
+                                if biz_data:
+                                    biz_df = pd.DataFrame(biz_data)
+                                    st.dataframe(biz_df, use_container_width=True, hide_index=True)
+                                
+                                st.info(analyze_simulation_results(sim_results))
+                        except Exception as e:
+                            st.error(f"Simulation error: {e}")
+            
+            # ===== Tab 4: Counterfactual Analysis =====
+            with adv_tab4:
+                st.markdown("### Counterfactual Impact Analysis")
+                st.write("Predict the impact of opening a business at a specific location.")
+                
+                if st.session_state.top_locations is not None and len(st.session_state.top_locations) > 0:
+                    selected_idx = st.slider("Select Location Rank", 1, 
+                                            min(10, len(st.session_state.top_locations)), 
+                                            1, key="cf_idx")
+                    
+                    location_row = st.session_state.top_locations.iloc[selected_idx - 1]
+                    
+                    st.markdown(f"**Selected Location: #{selected_idx}**")
+                    col_cf1, col_cf2, col_cf3 = st.columns(3)
+                    with col_cf1:
+                        st.metric("Latitude", f"{location_row['latitude']:.4f}")
+                    with col_cf2:
+                        st.metric("Longitude", f"{location_row['longitude']:.4f}")
+                    with col_cf3:
+                        st.metric("Location Score", f"{location_row['final_score']:.3f}")
+                    
+                    st.divider()
+                    
+                    col_cf_l, col_cf_r = st.columns(2)
+                    with col_cf_l:
+                        footfall_cf = st.number_input("Footfall Level", 0.0, 100.0, 50.0, key="cf_footfall")
+                        competition_cf = st.number_input("Competition Level", 0.0, 100.0, 30.0, key="cf_comp")
+                    
+                    with col_cf_r:
+                        transit_cf = st.number_input("Transit Accessibility", 0.0, 100.0, 70.0, key="cf_transit")
+                    
+                    if st.button("Calculate Counterfactual Impact", key="calc_cf"):
+                        from modules.business_suggestion import predict_counterfactual_effect
+                        
+                        features = {
+                            "footfall": footfall_cf,
+                            "competition": competition_cf,
+                            "transit": transit_cf
+                        }
+                        
+                        impact = predict_counterfactual_effect(
+                            (location_row['latitude'], location_row['longitude']),
+                            st.session_state.current_business or 'cafe',
+                            features
+                        )
+                        
+                        st.metric("Predicted Impact on Market", f"{impact:+.3f}")
+                        
+                        if impact > 0:
+                            st.success(f"✅ Positive impact: Opening here would increase local market value by {impact:.3f}")
+                        else:
+                            st.warning(f"⚠️ Negative impact: Opening here would decrease market value by {abs(impact):.3f}")
+                else:
+                    st.info("Run analysis first to enable counterfactual analysis.")
     
     else:
         st.info("👈 Configure your analysis parameters in the sidebar and click 'Run Analysis' to get started.")

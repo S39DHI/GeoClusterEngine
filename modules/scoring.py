@@ -8,7 +8,10 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from scipy.spatial import cKDTree
+from scipy.ndimage import gaussian_filter
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel
 
 
 class LocationScorer:
@@ -450,3 +453,60 @@ class LocationScorer:
         report.append("=" * 50)
         
         return "\n".join(report)
+
+
+def compute_opportunity_score(features: dict, weights: dict = None) -> float:
+    """
+    Compute weighted opportunity score for a location.
+    
+    Args:
+        features: Dictionary with feature values (footfall, income, competition, transit, safety, rent)
+        weights: Dictionary with feature weights (default normalized weights provided)
+        
+    Returns:
+        Normalized score between 0-100
+    """
+    if weights is None:
+        weights = {
+            "footfall": 0.25,
+            "income": 0.20,
+            "competition": -0.20,
+            "transit": 0.15,
+            "safety": 0.10,
+            "rent": -0.10
+        }
+    
+    score = sum(features.get(k, 0) * weights.get(k, 0) for k in features)
+    return max(0, min(100, score))
+
+
+def gp_predict_surface(X: np.ndarray, y: np.ndarray) -> GaussianProcessRegressor:
+    """
+    Fit Gaussian Process Regression for smooth, continuous place scoring.
+    
+    Args:
+        X: Feature matrix (n_samples, n_features)
+        y: Target scores
+        
+    Returns:
+        Fitted GaussianProcessRegressor model
+    """
+    kernel = ConstantKernel(1.0) * RBF(length_scale=0.2)
+    gp = GaussianProcessRegressor(kernel=kernel, alpha=0.1, n_restarts_optimizer=10)
+    gp.fit(X, y)
+    return gp
+
+
+def compute_confidence(data_density: float, noise_level: float) -> float:
+    """
+    Compute confidence score based on data density and noise level.
+    
+    Args:
+        data_density: Ratio of available data (0-1)
+        noise_level: Estimated noise/uncertainty (0-1)
+        
+    Returns:
+        Confidence score between 0-1
+    """
+    return round(max(0, 1 - (noise_level + (1 - data_density))), 2)
+

@@ -9,6 +9,8 @@ import geopandas as gpd
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
+from sklearn.neighbors import KernelDensity
+from scipy.ndimage import gaussian_filter
 from collections import Counter
 
 
@@ -391,3 +393,84 @@ class GeoClusterer:
         print(f"Saved clusters to {filepath}")
         
         return filepath
+
+
+def compute_kde(points: np.ndarray, bandwidth: float = 0.01, grid_size: int = 200) -> tuple:
+    """
+    Compute Kernel Density Estimation (KDE) heatmap for point data.
+    
+    Args:
+        points: Array of (lat, lon) coordinates
+        bandwidth: KDE bandwidth parameter
+        grid_size: Resolution of output grid
+        
+    Returns:
+        Tuple of (xx grid, yy grid, z density values)
+    """
+    if len(points) == 0:
+        return None, None, None
+    
+    kde = KernelDensity(bandwidth=bandwidth, kernel='gaussian')
+    kde.fit(points)
+    
+    x_min, y_min = points.min(axis=0)
+    x_max, y_max = points.max(axis=0)
+    
+    x_grid = np.linspace(x_min, x_max, grid_size)
+    y_grid = np.linspace(y_min, y_max, grid_size)
+    xx, yy = np.meshgrid(x_grid, y_grid)
+    
+    sample_grid = np.vstack([xx.ravel(), yy.ravel()]).T
+    z = kde.score_samples(sample_grid)
+    
+    return xx, yy, z.reshape(xx.shape)
+
+
+def smooth_heatmap(z: np.ndarray, sigma: float = 2.0) -> np.ndarray:
+    """
+    Apply Gaussian smoothing to heatmap data.
+    
+    Args:
+        z: 2D array of density values
+        sigma: Standard deviation for Gaussian kernel
+        
+    Returns:
+        Smoothed 2D array
+    """
+    if z is None:
+        return None
+    
+    return gaussian_filter(z, sigma=sigma)
+
+
+def spatio_temporal_hawkes(events: list) -> dict:
+    """
+    Placeholder for Hawkes Process spatio-temporal modeling.
+    
+    Args:
+        events: List of event records with (lat, lon, timestamp)
+        
+    Returns:
+        Dictionary with predicted hotspots (placeholder)
+    """
+    # Placeholder implementation - safe, doesn't break existing code
+    if not events:
+        return {"predicted_hotspots": []}
+    
+    # Simple aggregation as placeholder
+    hotspots = []
+    try:
+        if len(events) > 0:
+            event_lats = [e.get('lat', 0) for e in events if isinstance(e, dict)]
+            event_lons = [e.get('lon', 0) for e in events if isinstance(e, dict)]
+            
+            if event_lats and event_lons:
+                hotspots.append({
+                    'center_lat': np.mean(event_lats),
+                    'center_lon': np.mean(event_lons),
+                    'intensity': len(events)
+                })
+    except Exception:
+        pass
+    
+    return {"predicted_hotspots": hotspots}
