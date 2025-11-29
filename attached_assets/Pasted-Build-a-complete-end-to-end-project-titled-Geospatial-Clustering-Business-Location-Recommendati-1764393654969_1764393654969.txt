@@ -1,0 +1,263 @@
+Build a complete end-to-end project titled:
+
+“Geospatial Clustering & Business Location Recommendation System”
+
+Use the following full project description and implement everything in Python in Replit:
+
+PROJECT OBJECTIVE
+
+Develop a system that collects, cleans, visualizes, and clusters geospatial POI (shops, hospitals, schools, banks, etc.) to find the best location for a new business. The system must compute demand, competition, accessibility, and infrastructure scores to recommend ideal locations.
+
+PROJECT REQUIREMENTS
+1. Data Collection
+
+Implement a Python module that can fetch location data from OpenStreetMap using OSMnx / Overpass API.
+Fetch POIs such as:
+
+Shops
+
+Restaurants
+
+Schools
+
+Banks
+
+Hospitals
+
+Competitors (define category dynamically)
+
+Store them in CSV and GeoJSON format.
+
+2. Data Cleaning & Preparation
+
+Create a module that:
+
+Removes duplicates
+
+Fixes missing or invalid coordinates
+
+Normalizes category labels
+
+Converts CSV → GeoDataFrame
+
+Adds optional fields (rating, population, footfall if available)
+
+3. Geospatial Visualization
+
+Implement visualization using:
+
+Folium
+
+Marker Clustering
+
+Heatmaps
+
+Choropleth maps
+
+Generate maps such as:
+
+All POIs map
+
+Cluster map
+
+Heatmap of density
+
+Competition heatmap
+
+Save HTML maps to a /maps folder.
+
+4. Clustering (Machine Learning)
+
+Implement clustering algorithms:
+
+DBSCAN with haversine metric
+
+K-Means for comparison
+
+HDBSCAN (if installable)
+
+Steps:
+
+Convert lat/lon to numpy array
+
+Cluster using DBSCAN
+
+Mark cluster labels
+
+Detect hotspots & sparse regions
+
+5. KDE Heatmaps
+
+Implement Kernel Density Estimation maps:
+
+Population density (if supplied)
+
+POI density
+
+Competition vs demand gap
+
+Output as interactive Folium heatmaps.
+
+6. Suitability Analysis / Location Scoring Model
+
+Implement scoring model with parameters:
+
+Final Score =
+    w1 * demand_score +
+    w2 * low_competition_score +
+    w3 * accessibility_score +
+    w4 * infrastructure_score
+
+
+Weight defaults:
+
+demand = 0.4
+
+competition = 0.3
+
+accessibility = 0.2
+
+infrastructure = 0.1
+
+Compute:
+
+Competition Score → inverse cluster density
+
+Demand Score → based on population + supporting POIs
+
+Accessibility Score → roads, transport, centrality
+
+Infrastructure Score → hospitals, banks, schools nearby
+
+Return a ranked CSV of top 10 best locations.
+
+7. Output Modules
+
+Generate:
+
+A. CSV outputs
+
+cleaned_pois.csv
+
+clusters.csv
+
+location_scores.csv
+
+B. HTML Map Outputs
+
+all_pois_map.html
+
+cluster_map.html
+
+heatmap.html
+
+best_locations_map.html
+
+C. Console Report
+
+Print analysis:
+
+number of POIs
+
+number of clusters
+
+sparse zones
+
+recommended business zones
+
+8. Optional Dashboard
+
+If possible, create a simple Streamlit dashboard with:
+
+Map view
+
+Cluster selection
+
+Filters (business category, radius)
+
+Top recommended locations
+
+9. Project Structure
+
+Generate the following folder structure:
+
+/project
+    /data
+        raw_data.csv
+        cleaned_data.csv
+        clusters.csv
+        scores.csv
+    /maps
+        all_pois_map.html
+        cluster_map.html
+        heatmap.html
+        recommendations_map.html
+    /modules
+        fetch_data.py
+        clean_data.py
+        visualize.py
+        clustering.py
+        scoring.py
+    main.py
+    README.md
+
+10. README.md Specification
+
+Include:
+
+Full project explanation
+
+How to run the project
+
+Algorithms used
+
+Screenshots placeholders
+
+Future improvements section
+
+11. Deliverables
+
+Your final output should include:
+
+✔ Complete working Python code
+✔ Fully generated folder structure
+✔ All modules imported in main.py
+✔ Maps saved as HTML
+✔ CSV outputs saved in /data/
+✔ A clean README.md describing everything
+✔ Comments + documentation inside code
+
+12. City Input System
+
+Allow user to input:
+
+City name
+
+Business type
+
+Radius (meters/km)
+
+Example:
+
+Enter city: Bangalore
+Enter business type: coffee_shop
+Enter search radius (km): 5
+
+13. Ensure the Replit project runs completely
+
+Everything must run using:
+
+pip install osmnx geopandas folium scikit-learn pandas numpy shapely
+
+
+Now generate the entire Replit project with
+
+Full code
+
+Full folder structure
+
+Full README
+
+All modules
+
+Example outputs
