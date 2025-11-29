@@ -251,7 +251,7 @@ def compute_candidates(place= "Delhi, India",
 if "candidates_geojson" not in st.session_state:
     st.session_state.candidates_geojson = {"type":"FeatureCollection","features":[]}
 
-params = st.experimental_get_query_params()
+params = st.query_params
 pre_lat = params.get("lat", [""])[0]
 pre_lon = params.get("lon", [""])[0]
 pre_r = params.get("r", ["10"])[0]
